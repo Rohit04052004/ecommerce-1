@@ -10,8 +10,6 @@ import couponRoutes from "./routes/coupon.route.js";
 import paymentRoutes from "./routes/payment.route.js";
 import analyticsRoutes from "./routes/analytics.route.js";
 
-import { connectDB } from "./lib/db.js";
-
 dotenv.config();
 
 const app = express();
@@ -38,15 +36,12 @@ if (process.env.NODE_ENV === "production" && !process.env.VERCEL) {
 }
 
 // On Vercel this module is imported as a serverless function instead of
-// run as a standalone process, so only bind a port locally, and connect
-// to the DB once at cold start rather than inside the listen callback.
+// run as a standalone process, so only bind a port locally. Prisma connects
+// lazily on first query, so there's no explicit connect step needed here.
 if (!process.env.VERCEL) {
 	app.listen(PORT, () => {
 		console.log("Server is running on http://localhost:" + PORT);
-		connectDB();
 	});
-} else {
-	connectDB();
 }
 
 export default app;

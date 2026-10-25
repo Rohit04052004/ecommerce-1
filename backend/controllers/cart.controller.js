@@ -1,16 +1,19 @@
-import Product from "../models/product.model.js";
+import prisma from "../lib/prisma.js";
 
 export const getCartProducts = async (req, res) => {
 	try {
-		const products = await Product.find({ _id: { $in: req.user.cartItems } });
-
-		// add quantity for each product
-		const cartItems = products.map((product) => {
-			const item = req.user.cartItems.find((cartItem) => cartItem.id === product.id);
-			return { ...product.toJSON(), quantity: item.quantity };
+		const cartItems = await prisma.cartItem.findMany({
+			where: { userId: req.user.id },
+			include: { product: true },
 		});
 
-		res.json(cartItems);
+		const items = cartItems.map(({ product, quantity }) => ({
+			...product,
+			_id: product.id,
+			quantity,
+		}));
+
+		res.json(items);
 	} catch (error) {
 		console.log("Error in getCartProducts controller", error.message);
 		res.status(500).json({ message: "Server error", error: error.message });
@@ -19,18 +22,16 @@ export const getCartProducts = async (req, res) => {
 
 export const addToCart = async (req, res) => {
 	try {
-		const { productId } = req.body;
-		const user = req.user;
+		const productId = Number(req.body.productId);
 
-		const existingItem = user.cartItems.find((item) => item.id === productId);
-		if (existingItem) {
-			existingItem.quantity += 1;
-		} else {
-			user.cartItems.push(productId);
-		}
+		await prisma.cartItem.upsert({
+			where: { userId_productId: { userId: req.user.id, productId } },
+			update: { quantity: { increment: 1 } },
+			create: { userId: req.user.id, productId, quantity: 1 },
+		});
 
-		await user.save();
-		res.json(user.cartItems);
+		const cartItems = await prisma.cartItem.findMany({ where: { userId: req.user.id } });
+		res.json(cartItems.map((item) => ({ id: item.productId, quantity: item.quantity })));
 	} catch (error) {
 		console.log("Error in addToCart controller", error.message);
 		res.status(500).json({ message: "Server error", error: error.message });
@@ -40,14 +41,15 @@ export const addToCart = async (req, res) => {
 export const removeAllFromCart = async (req, res) => {
 	try {
 		const { productId } = req.body;
-		const user = req.user;
+
 		if (!productId) {
-			user.cartItems = [];
+			await prisma.cartItem.deleteMany({ where: { userId: req.user.id } });
 		} else {
-			user.cartItems = user.cartItems.filter((item) => item.id !== productId);
+			await prisma.cartItem.deleteMany({ where: { userId: req.user.id, productId: Number(productId) } });
 		}
-		await user.save();
-		res.json(user.cartItems);
+
+		const cartItems = await prisma.cartItem.findMany({ where: { userId: req.user.id } });
+		res.json(cartItems.map((item) => ({ id: item.productId, quantity: item.quantity })));
 	} catch (error) {
 		res.status(500).json({ message: "Server error", error: error.message });
 	}
@@ -55,24 +57,25 @@ export const removeAllFromCart = async (req, res) => {
 
 export const updateQuantity = async (req, res) => {
 	try {
-		const { id: productId } = req.params;
+		const productId = Number(req.params.id);
 		const { quantity } = req.body;
-		const user = req.user;
-		const existingItem = user.cartItems.find((item) => item.id === productId);
 
-		if (existingItem) {
-			if (quantity === 0) {
-				user.cartItems = user.cartItems.filter((item) => item.id !== productId);
-				await user.save();
-				return res.json(user.cartItems);
-			}
+		const existingItem = await prisma.cartItem.findUnique({
+			where: { userId_productId: { userId: req.user.id, productId } },
+		});
 
-			existingItem.quantity = quantity;
-			await user.save();
-			res.json(user.cartItems);
-		} else {
-			res.status(404).json({ message: "Product not found" });
+		if (!existingItem) {
+			return res.status(404).json({ message: "Product not found" });
 		}
+
+		if (quantity === 0) {
+			await prisma.cartItem.delete({ where: { id: existingItem.id } });
+		} else {
+			await prisma.cartItem.update({ where: { id: existingItem.id }, data: { quantity } });
+		}
+
+		const cartItems = await prisma.cartItem.findMany({ where: { userId: req.user.id } });
+		res.json(cartItems.map((item) => ({ id: item.productId, quantity: item.quantity })));
 	} catch (error) {
 		console.log("Error in updateQuantity controller", error.message);
 		res.status(500).json({ message: "Server error", error: error.message });

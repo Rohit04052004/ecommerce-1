@@ -1,11 +1,12 @@
-import { redis } from "../lib/redis.js";
 import cloudinary from "../lib/cloudinary.js";
-import Product from "../models/product.model.js";
+import prisma from "../lib/prisma.js";
+
+const withId = (product) => product && { ...product, _id: product.id };
 
 export const getAllProducts = async (req, res) => {
 	try {
-		const products = await Product.find({}); // find all products
-		res.json({ products });
+		const products = await prisma.product.findMany();
+		res.json({ products: products.map(withId) });
 	} catch (error) {
 		console.log("Error in getAllProducts controller", error.message);
 		res.status(500).json({ message: "Server error", error: error.message });
@@ -14,25 +15,8 @@ export const getAllProducts = async (req, res) => {
 
 export const getFeaturedProducts = async (req, res) => {
 	try {
-		let featuredProducts = await redis.get("featured_products");
-		if (featuredProducts) {
-			return res.json(JSON.parse(featuredProducts));
-		}
-
-		// if not in redis, fetch from mongodb
-		// .lean() is gonna return a plain javascript object instead of a mongodb document
-		// which is good for performance
-		featuredProducts = await Product.find({ isFeatured: true }).lean();
-
-		if (!featuredProducts) {
-			return res.status(404).json({ message: "No featured products found" });
-		}
-
-		// store in redis for future quick access
-
-		await redis.set("featured_products", JSON.stringify(featuredProducts));
-
-		res.json(featuredProducts);
+		const featuredProducts = await prisma.product.findMany({ where: { isFeatured: true } });
+		res.json(featuredProducts.map(withId));
 	} catch (error) {
 		console.log("Error in getFeaturedProducts controller", error.message);
 		res.status(500).json({ message: "Server error", error: error.message });
@@ -49,15 +33,17 @@ export const createProduct = async (req, res) => {
 			cloudinaryResponse = await cloudinary.uploader.upload(image, { folder: "products" });
 		}
 
-		const product = await Product.create({
-			name,
-			description,
-			price,
-			image: cloudinaryResponse?.secure_url ? cloudinaryResponse.secure_url : "",
-			category,
+		const product = await prisma.product.create({
+			data: {
+				name,
+				description,
+				price: Number(price),
+				image: cloudinaryResponse?.secure_url ? cloudinaryResponse.secure_url : "",
+				category,
+			},
 		});
 
-		res.status(201).json(product);
+		res.status(201).json(withId(product));
 	} catch (error) {
 		console.log("Error in createProduct controller", error.message);
 		res.status(500).json({ message: "Server error", error: error.message });
@@ -66,7 +52,8 @@ export const createProduct = async (req, res) => {
 
 export const deleteProduct = async (req, res) => {
 	try {
-		const product = await Product.findById(req.params.id);
+		const id = Number(req.params.id);
+		const product = await prisma.product.findUnique({ where: { id } });
 
 		if (!product) {
 			return res.status(404).json({ message: "Product not found" });
@@ -82,7 +69,7 @@ export const deleteProduct = async (req, res) => {
 			}
 		}
 
-		await Product.findByIdAndDelete(req.params.id);
+		await prisma.product.delete({ where: { id } });
 
 		res.json({ message: "Product deleted successfully" });
 	} catch (error) {
@@ -93,22 +80,13 @@ export const deleteProduct = async (req, res) => {
 
 export const getRecommendedProducts = async (req, res) => {
 	try {
-		const products = await Product.aggregate([
-			{
-				$sample: { size: 4 },
-			},
-			{
-				$project: {
-					_id: 1,
-					name: 1,
-					description: 1,
-					image: 1,
-					price: 1,
-				},
-			},
-		]);
+		const products = await prisma.$queryRaw`
+			SELECT id, name, description, image, price FROM "Product"
+			ORDER BY random()
+			LIMIT 4
+		`;
 
-		res.json(products);
+		res.json(products.map(withId));
 	} catch (error) {
 		console.log("Error in getRecommendedProducts controller", error.message);
 		res.status(500).json({ message: "Server error", error: error.message });
@@ -118,8 +96,8 @@ export const getRecommendedProducts = async (req, res) => {
 export const getProductsByCategory = async (req, res) => {
 	const { category } = req.params;
 	try {
-		const products = await Product.find({ category });
-		res.json({ products });
+		const products = await prisma.product.findMany({ where: { category } });
+		res.json({ products: products.map(withId) });
 	} catch (error) {
 		console.log("Error in getProductsByCategory controller", error.message);
 		res.status(500).json({ message: "Server error", error: error.message });
@@ -128,12 +106,15 @@ export const getProductsByCategory = async (req, res) => {
 
 export const toggleFeaturedProduct = async (req, res) => {
 	try {
-		const product = await Product.findById(req.params.id);
+		const id = Number(req.params.id);
+		const product = await prisma.product.findUnique({ where: { id } });
+
 		if (product) {
-			product.isFeatured = !product.isFeatured;
-			const updatedProduct = await product.save();
-			await updateFeaturedProductsCache();
-			res.json(updatedProduct);
+			const updatedProduct = await prisma.product.update({
+				where: { id },
+				data: { isFeatured: !product.isFeatured },
+			});
+			res.json(withId(updatedProduct));
 		} else {
 			res.status(404).json({ message: "Product not found" });
 		}
@@ -142,14 +123,3 @@ export const toggleFeaturedProduct = async (req, res) => {
 		res.status(500).json({ message: "Server error", error: error.message });
 	}
 };
-
-async function updateFeaturedProductsCache() {
-	try {
-		// The lean() method  is used to return plain JavaScript objects instead of full Mongoose documents. This can significantly improve performance
-
-		const featuredProducts = await Product.find({ isFeatured: true }).lean();
-		await redis.set("featured_products", JSON.stringify(featuredProducts));
-	} catch (error) {
-		console.log("error in update cache function");
-	}
-}

@@ -1,73 +1,44 @@
-import Order from "../models/order.model.js";
-import Product from "../models/product.model.js";
-import User from "../models/user.model.js";
+import prisma from "../lib/prisma.js";
 
 export const getAnalyticsData = async () => {
-	const totalUsers = await User.countDocuments();
-	const totalProducts = await Product.countDocuments();
+	const totalUsers = await prisma.user.count();
+	const totalProducts = await prisma.product.count();
 
-	const salesData = await Order.aggregate([
-		{
-			$group: {
-				_id: null, // it groups all documents together,
-				totalSales: { $sum: 1 },
-				totalRevenue: { $sum: "$totalAmount" },
-			},
-		},
-	]);
-
-	const { totalSales, totalRevenue } = salesData[0] || { totalSales: 0, totalRevenue: 0 };
+	const salesData = await prisma.order.aggregate({
+		_count: { _all: true },
+		_sum: { totalAmount: true },
+	});
 
 	return {
 		users: totalUsers,
 		products: totalProducts,
-		totalSales,
-		totalRevenue,
+		totalSales: salesData._count._all,
+		totalRevenue: salesData._sum.totalAmount || 0,
 	};
 };
 
 export const getDailySalesData = async (startDate, endDate) => {
 	try {
-		const dailySalesData = await Order.aggregate([
-			{
-				$match: {
-					createdAt: {
-						$gte: startDate,
-						$lte: endDate,
-					},
-				},
-			},
-			{
-				$group: {
-					_id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } },
-					sales: { $sum: 1 },
-					revenue: { $sum: "$totalAmount" },
-				},
-			},
-			{ $sort: { _id: 1 } },
-		]);
+		const orders = await prisma.order.findMany({
+			where: { createdAt: { gte: startDate, lte: endDate } },
+			select: { createdAt: true, totalAmount: true },
+		});
 
-		// example of dailySalesData
-		// [
-		// 	{
-		// 		_id: "2024-08-18",
-		// 		sales: 12,
-		// 		revenue: 1450.75
-		// 	},
-		// ]
+		const byDate = {};
+		for (const order of orders) {
+			const day = order.createdAt.toISOString().split("T")[0];
+			if (!byDate[day]) byDate[day] = { sales: 0, revenue: 0 };
+			byDate[day].sales += 1;
+			byDate[day].revenue += order.totalAmount;
+		}
 
 		const dateArray = getDatesInRange(startDate, endDate);
-		// console.log(dateArray) // ['2024-08-18', '2024-08-19', ... ]
 
-		return dateArray.map((date) => {
-			const foundData = dailySalesData.find((item) => item._id === date);
-
-			return {
-				date,
-				sales: foundData?.sales || 0,
-				revenue: foundData?.revenue || 0,
-			};
-		});
+		return dateArray.map((date) => ({
+			date,
+			sales: byDate[date]?.sales || 0,
+			revenue: byDate[date]?.revenue || 0,
+		}));
 	} catch (error) {
 		throw error;
 	}

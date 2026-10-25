@@ -1,8 +1,11 @@
-import Coupon from "../models/coupon.model.js";
-import Order from "../models/order.model.js";
+import prisma from "../lib/prisma.js";
 import { stripe } from "../lib/stripe.js";
 
 export const createCheckoutSession = async (req, res) => {
+	if (!stripe) {
+		return res.status(503).json({ message: "Stripe API key missing — set STRIPE_SECRET_KEY to enable checkout" });
+	}
+
 	try {
 		const { products, couponCode } = req.body;
 
@@ -31,7 +34,7 @@ export const createCheckoutSession = async (req, res) => {
 
 		let coupon = null;
 		if (couponCode) {
-			coupon = await Coupon.findOne({ code: couponCode, userId: req.user._id, isActive: true });
+			coupon = await prisma.coupon.findFirst({ where: { code: couponCode, userId: req.user.id, isActive: true } });
 			if (coupon) {
 				totalAmount -= Math.round((totalAmount * coupon.discountPercentage) / 100);
 			}
@@ -51,7 +54,7 @@ export const createCheckoutSession = async (req, res) => {
 				  ]
 				: [],
 			metadata: {
-				userId: req.user._id.toString(),
+				userId: req.user.id.toString(),
 				couponCode: couponCode || "",
 				products: JSON.stringify(
 					products.map((p) => ({
@@ -64,7 +67,7 @@ export const createCheckoutSession = async (req, res) => {
 		});
 
 		if (totalAmount >= 20000) {
-			await createNewCoupon(req.user._id);
+			await createNewCoupon(req.user.id);
 		}
 		res.status(200).json({ id: session.id, totalAmount: totalAmount / 100 });
 	} catch (error) {
@@ -74,42 +77,43 @@ export const createCheckoutSession = async (req, res) => {
 };
 
 export const checkoutSuccess = async (req, res) => {
+	if (!stripe) {
+		return res.status(503).json({ message: "Stripe API key missing — set STRIPE_SECRET_KEY to enable checkout" });
+	}
+
 	try {
 		const { sessionId } = req.body;
 		const session = await stripe.checkout.sessions.retrieve(sessionId);
 
 		if (session.payment_status === "paid") {
 			if (session.metadata.couponCode) {
-				await Coupon.findOneAndUpdate(
-					{
-						code: session.metadata.couponCode,
-						userId: session.metadata.userId,
-					},
-					{
-						isActive: false,
-					}
-				);
+				await prisma.coupon.updateMany({
+					where: { code: session.metadata.couponCode, userId: Number(session.metadata.userId) },
+					data: { isActive: false },
+				});
 			}
 
-			// create a new Order
 			const products = JSON.parse(session.metadata.products);
-			const newOrder = new Order({
-				user: session.metadata.userId,
-				products: products.map((product) => ({
-					product: product.id,
-					quantity: product.quantity,
-					price: product.price,
-				})),
-				totalAmount: session.amount_total / 100, // convert from cents to dollars,
-				stripeSessionId: sessionId,
-			});
 
-			await newOrder.save();
+			const newOrder = await prisma.order.create({
+				data: {
+					userId: Number(session.metadata.userId),
+					totalAmount: session.amount_total / 100, // convert from cents to dollars
+					stripeSessionId: sessionId,
+					items: {
+						create: products.map((product) => ({
+							productId: Number(product.id),
+							quantity: product.quantity,
+							price: product.price,
+						})),
+					},
+				},
+			});
 
 			res.status(200).json({
 				success: true,
 				message: "Payment successful, order created, and coupon deactivated if used.",
-				orderId: newOrder._id,
+				orderId: newOrder.id,
 			});
 		}
 	} catch (error) {
@@ -128,16 +132,16 @@ async function createStripeCoupon(discountPercentage) {
 }
 
 async function createNewCoupon(userId) {
-	await Coupon.findOneAndDelete({ userId });
+	await prisma.coupon.deleteMany({ where: { userId } });
 
-	const newCoupon = new Coupon({
-		code: "GIFT" + Math.random().toString(36).substring(2, 8).toUpperCase(),
-		discountPercentage: 10,
-		expirationDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days from now
-		userId: userId,
+	const newCoupon = await prisma.coupon.create({
+		data: {
+			code: "GIFT" + Math.random().toString(36).substring(2, 8).toUpperCase(),
+			discountPercentage: 10,
+			expirationDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days from now
+			userId,
+		},
 	});
-
-	await newCoupon.save();
 
 	return newCoupon;
 }
