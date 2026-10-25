@@ -4,7 +4,9 @@ A full-stack e-commerce app with auth, cart, checkout, coupons, and an admin das
 
 ![Demo App](/frontend/public/screenshot-for-readme.png)
 
-**Live demo:** https://ecommerce-1-kohl.vercel.app
+- **Live demo:** https://ecommerce-1-kohl.vercel.app
+- **Repo:** https://github.com/Rohit04052004/ecommerce-1
+- **Author:** [Rohit Chigatapu](https://github.com/Rohit04052004)
 
 ## Features
 
@@ -26,6 +28,13 @@ This started as a MongoDB + Redis MERN app and was migrated to Postgres/Prisma, 
 This is a single deployable app: the Express server exposes the API under `/api/*` and, in production, serves the built React frontend for everything else.
 
 ## Setup
+
+### 0. Clone
+
+```bash
+git clone https://github.com/Rohit04052004/ecommerce-1.git
+cd ecommerce-1
+```
 
 ### 1. Database
 
@@ -74,11 +83,27 @@ npm run build   # installs deps + builds the frontend into frontend/dist
 npm run start
 ```
 
-## Deploying on Vercel
+## Deployment
 
 This repo includes a root `vercel.json` that builds the frontend as a static site and the backend (`backend/server.js`) as a Node serverless function, routing `/api/*` to the function and everything else to the static build.
 
-The Neon Postgres integration already provides the database env vars automatically. Add `ACCESS_TOKEN_SECRET`, `REFRESH_TOKEN_SECRET`, and `CLIENT_URL` in the Vercel project settings; add `STRIPE_SECRET_KEY` and the Cloudinary vars when you're ready to enable checkout and image upload.
+- **Status:** live at https://ecommerce-1-kohl.vercel.app
+- **Database:** Postgres via Neon, provisioned through Vercel's integration — `POSTGRES_PRISMA_URL` / `POSTGRES_URL_NON_POOLING` are set automatically
+- **Auth secrets:** `ACCESS_TOKEN_SECRET`, `REFRESH_TOKEN_SECRET`, `CLIENT_URL` are set on the Vercel project
+- **Auto-deploy:** the Vercel project is connected to this GitHub repo — every push to `main` triggers a new production deployment
+- **Not yet configured:** `STRIPE_SECRET_KEY` (checkout returns a 503 until this is set) and the Cloudinary vars (needed only for product image upload)
+
+To redeploy manually or set up your own copy:
+
+```bash
+npm i -g vercel
+vercel link            # link this directory to a Vercel project
+vercel integration add neon   # provisions Postgres automatically, no account needed up front
+vercel env add ACCESS_TOKEN_SECRET production
+vercel env add REFRESH_TOKEN_SECRET production
+vercel env add CLIENT_URL production
+vercel --prod
+```
 
 ## Credits
 

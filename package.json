@@ -1,8 +1,16 @@
 {
 	"name": "e-commerce-store",
 	"version": "1.0.0",
-	"description": "Full-stack MERN e-commerce app with auth, cart, checkout, coupons, and an admin dashboard",
+	"description": "Full-stack e-commerce app (React, Express, Postgres/Prisma) with auth, cart, Stripe checkout, coupons, and an admin dashboard",
 	"main": "backend/server.js",
+	"homepage": "https://ecommerce-1-kohl.vercel.app",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/Rohit04052004/ecommerce-1.git"
+	},
+	"bugs": {
+		"url": "https://github.com/Rohit04052004/ecommerce-1/issues"
+	},
 	"scripts": {
 		"dev": "nodemon backend/server.js",
 		"start": "node backend/server.js",
@@ -13,7 +21,7 @@
 	"keywords": [],
 	"author": "Rohit Chigatapu",
 	"type": "module",
-	"license": "ISC",
+	"license": "MIT",
 	"dependencies": {
 		"@prisma/client": "^6.3.0",
 		"bcryptjs": "^2.4.3",
